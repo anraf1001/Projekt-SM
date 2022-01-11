@@ -213,7 +213,7 @@ void StartControllerTask(void *argument)
   /* USER CODE BEGIN StartControllerTask */
 	LcdMessage_t message;
 	float temperature;
-	float setpoint = 28.f;
+	float setpoint = 26.f;
 	float pid_output;
 
 	Saturation saturation = {.lower_bound = 0, .upper_bound = 1};
