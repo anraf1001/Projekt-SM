@@ -27,6 +27,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "i2c.h"
 #include "usart.h"
@@ -36,6 +37,7 @@
 #include "LCD_HD44780.h"
 #include "PID_Controller.h"
 #include "printf.h"
+#include "ring_buffer.h"
 #include "Saturation.h"
 /* USER CODE END Includes */
 
@@ -59,7 +61,9 @@ typedef struct {
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-
+RingBuffer_t buffer;
+uint8_t received_char;
+uint8_t num_of_received_cmds;
 /* USER CODE END Variables */
 /* Definitions for LCDTask */
 osThreadId_t LCDTaskHandle;
@@ -82,15 +86,32 @@ const osThreadAttr_t HeartBeatTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
+/* Definitions for ParsingTask */
+osThreadId_t ParsingTaskHandle;
+const osThreadAttr_t ParsingTask_attributes = {
+  .name = "ParsingTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for TempQueue */
 osMessageQueueId_t TempQueueHandle;
 const osMessageQueueAttr_t TempQueue_attributes = {
   .name = "TempQueue"
 };
+/* Definitions for SetpointQueue */
+osMessageQueueId_t SetpointQueueHandle;
+const osMessageQueueAttr_t SetpointQueue_attributes = {
+  .name = "SetpointQueue"
+};
 /* Definitions for LcdDataTimer */
 osTimerId_t LcdDataTimerHandle;
 const osTimerAttr_t LcdDataTimer_attributes = {
   .name = "LcdDataTimer"
+};
+/* Definitions for UartMutex */
+osMutexId_t UartMutexHandle;
+const osMutexAttr_t UartMutex_attributes = {
+  .name = "UartMutex"
 };
 /* Definitions for TempQueueSemaphore */
 osSemaphoreId_t TempQueueSemaphoreHandle;
@@ -106,6 +127,7 @@ const osSemaphoreAttr_t TempQueueSemaphore_attributes = {
 void StartLCDTask(void *argument);
 void StartControllerTask(void *argument);
 void HeartBeatTaskTask(void *argument);
+void StartParsingTask(void *argument);
 void LcdDataTimerCallback(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -119,6 +141,9 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
+  /* Create the mutex(es) */
+  /* creation of UartMutex */
+  UartMutexHandle = osMutexNew(&UartMutex_attributes);
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -144,6 +169,9 @@ void MX_FREERTOS_Init(void) {
   /* creation of TempQueue */
   TempQueueHandle = osMessageQueueNew (8, sizeof(LcdMessage_t), &TempQueue_attributes);
 
+  /* creation of SetpointQueue */
+  SetpointQueueHandle = osMessageQueueNew (8, sizeof(float), &SetpointQueue_attributes);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -157,6 +185,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of HeartBeatTask */
   HeartBeatTaskHandle = osThreadNew(HeartBeatTaskTask, NULL, &HeartBeatTask_attributes);
+
+  /* creation of ParsingTask */
+  ParsingTaskHandle = osThreadNew(StartParsingTask, NULL, &ParsingTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -190,12 +221,19 @@ void StartLCDTask(void *argument)
 		  LCD_Cls();
 
 		  sprintf((char*)text, "Zad. : %.2f C", message.setpoint);
+		  taskENTER_CRITICAL();
 		  LCD_Locate(0,0);
 		  LCD_String((char*)text);
+		  taskEXIT_CRITICAL();
 
 		  sprintf((char*)text, "Temp.: %.2f C", message.measured);
+		  taskENTER_CRITICAL();
 		  LCD_Locate(0,1);
 		  LCD_String((char*)text);
+		  taskEXIT_CRITICAL();
+
+		  printf("Zad. : %.2f C\r\n", message.setpoint);
+		  printf("Temp.: %.2f C\r\n", message.measured);
 	  }
   }
   /* USER CODE END StartLCDTask */
@@ -213,16 +251,18 @@ void StartControllerTask(void *argument)
   /* USER CODE BEGIN StartControllerTask */
 	LcdMessage_t message;
 	float temperature;
-	float setpoint = 26.f;
+	float setpoint = 26.5f;
 	float pid_output;
 
 	Saturation saturation = {.lower_bound = 0, .upper_bound = 1};
 	const float P = 1.3;
-	const float I = 0.015;
-	PID_Controller controller = PID_Create_Saturation(P, I, 0, 0.1, &saturation);
+	const float I = 0.025;
+	const float D = 0;
+	PID_Controller controller = PID_Create_Saturation(P, I, D, 0.1, &saturation);
 
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	BMP280_Init(&hi2c1, BMP280_TEMPERATURE_16BIT, BMP280_STANDARD, BMP280_FORCEDMODE);
+	BMP280_SetConfig(BME280_STANDBY_MS_0_5, BME280_FILTER_X4);
 
 	osTimerStart(LcdDataTimerHandle, 1000);
 
@@ -230,18 +270,19 @@ void StartControllerTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	  osMessageQueueGet(SetpointQueueHandle, &setpoint, 0, 0);
+
+	  taskENTER_CRITICAL();
 	  temperature = BMP280_ReadTemperature();
+	  pid_output = calculate_pid(&controller, setpoint - temperature);
+	  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (uint16_t)(pid_output * 999));
+	  taskEXIT_CRITICAL();
+
 	  message.setpoint = setpoint;
 	  message.measured = temperature;
 	  if (osOK == osSemaphoreAcquire(TempQueueSemaphoreHandle, 0)) {
-		  osMessageQueuePut(TempQueueHandle, &message, 0, osWaitForever);
+		  osMessageQueuePut(TempQueueHandle, &message, 0, 0);
 	  }
-
-	  printf("%.2f,", temperature);
-
-	  pid_output = calculate_pid(&controller, setpoint - temperature);
-
-	  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (uint16_t)(pid_output * 1000));
 
 	  tick += 100;
 	  osDelayUntil(tick);
@@ -268,6 +309,36 @@ void HeartBeatTaskTask(void *argument)
   /* USER CODE END HeartBeatTaskTask */
 }
 
+/* USER CODE BEGIN Header_StartParsingTask */
+/**
+* @brief Function implementing the ParsingTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartParsingTask */
+void StartParsingTask(void *argument)
+{
+  /* USER CODE BEGIN StartParsingTask */
+	uint8_t received_data[16];
+	float new_setpoint;
+	HAL_UART_Receive_IT(&huart3, &received_char, 1);
+  /* Infinite loop */
+  for(;;)
+  {
+	  if (num_of_received_cmds > 0) {
+		  RB_TakeLine(&buffer, received_data);
+		  num_of_received_cmds--;
+
+		  new_setpoint = atoff((char*)received_data);
+		  if (new_setpoint != 0.0f) {
+			  osMessageQueuePut(SetpointQueueHandle, &new_setpoint, 0, 0);
+		  }
+	  }
+	  osDelay(100);
+  }
+  /* USER CODE END StartParsingTask */
+}
+
 /* LcdDataTimerCallback function */
 void LcdDataTimerCallback(void *argument)
 {
@@ -279,7 +350,21 @@ void LcdDataTimerCallback(void *argument)
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
 void _putchar(char character) {
+	osMutexAcquire(UartMutexHandle, osWaitForever);
 	HAL_UART_Transmit(&huart3, (uint8_t*)&character, 1, 1000);
+	osMutexRelease(UartMutexHandle);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+	if (huart->Instance == USART3) {
+		 if (RB_OK == RB_Write(&buffer, received_char)) {
+			 if (received_char == '\n') {
+				 num_of_received_cmds++;
+			 }
+		 }
+
+		 HAL_UART_Receive_IT(&huart3, &received_char, 1);
+	}
 }
 /* USER CODE END Application */
 

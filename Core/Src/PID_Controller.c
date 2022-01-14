@@ -34,10 +34,12 @@ float calculate_pid(PID_Controller* controller, float error) {
 
     float u = P + I + D;
     float u_saturation = calculate_saturation(u, controller->saturation);
+
     if (fabs(u) > fabs(u_saturation)) {
         controller->windup = true;
     } else {
         controller->windup = false;
     }
+
     return u_saturation;
 }
