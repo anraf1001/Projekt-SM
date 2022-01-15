@@ -263,8 +263,8 @@ void StartControllerTask(void *argument)
 
 	Saturation saturation = {.lower_bound = 0, .upper_bound = 1};
 	const float P = 1.3;
-	const float I = 0.026;
-	const float D = 5;
+	const float I = 0.021;
+	const float D = 9;
 	PID_Controller controller = PID_Create_Saturation(P, I, D, 0.1, &saturation);
 
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
