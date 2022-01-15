@@ -63,7 +63,6 @@ typedef struct {
 /* USER CODE BEGIN Variables */
 RingBuffer_t buffer;
 uint8_t received_char;
-uint8_t num_of_received_cmds;
 /* USER CODE END Variables */
 /* Definitions for LCDTask */
 osThreadId_t LCDTaskHandle;
@@ -118,6 +117,11 @@ osSemaphoreId_t TempQueueSemaphoreHandle;
 const osSemaphoreAttr_t TempQueueSemaphore_attributes = {
   .name = "TempQueueSemaphore"
 };
+/* Definitions for ReadLinesCountingSem */
+osSemaphoreId_t ReadLinesCountingSemHandle;
+const osSemaphoreAttr_t ReadLinesCountingSem_attributes = {
+  .name = "ReadLinesCountingSem"
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -152,6 +156,9 @@ void MX_FREERTOS_Init(void) {
   /* Create the semaphores(s) */
   /* creation of TempQueueSemaphore */
   TempQueueSemaphoreHandle = osSemaphoreNew(1, 1, &TempQueueSemaphore_attributes);
+
+  /* creation of ReadLinesCountingSem */
+  ReadLinesCountingSemHandle = osSemaphoreNew(4, 0, &ReadLinesCountingSem_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -251,18 +258,18 @@ void StartControllerTask(void *argument)
   /* USER CODE BEGIN StartControllerTask */
 	LcdMessage_t message;
 	float temperature;
-	float setpoint = 26.5f;
+	float setpoint = 27.f;
 	float pid_output;
 
 	Saturation saturation = {.lower_bound = 0, .upper_bound = 1};
 	const float P = 1.3;
-	const float I = 0.025;
-	const float D = 0;
+	const float I = 0.026;
+	const float D = 5;
 	PID_Controller controller = PID_Create_Saturation(P, I, D, 0.1, &saturation);
 
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	BMP280_Init(&hi2c1, BMP280_TEMPERATURE_16BIT, BMP280_STANDARD, BMP280_FORCEDMODE);
-	BMP280_SetConfig(BME280_STANDBY_MS_0_5, BME280_FILTER_X4);
+	BMP280_SetConfig(BME280_STANDBY_MS_0_5, BME280_FILTER_X16);
 
 	osTimerStart(LcdDataTimerHandle, 1000);
 
@@ -321,20 +328,20 @@ void StartParsingTask(void *argument)
   /* USER CODE BEGIN StartParsingTask */
 	uint8_t received_data[16];
 	float new_setpoint;
+	Saturation saturation = {.lower_bound = 25.f, .upper_bound = 30.f};
 	HAL_UART_Receive_IT(&huart3, &received_char, 1);
   /* Infinite loop */
   for(;;)
   {
-	  if (num_of_received_cmds > 0) {
+	  if (osOK == osSemaphoreAcquire(ReadLinesCountingSemHandle, osWaitForever)) {
 		  RB_TakeLine(&buffer, received_data);
-		  num_of_received_cmds--;
 
 		  new_setpoint = atoff((char*)received_data);
 		  if (new_setpoint != 0.0f) {
+			  new_setpoint = calculate_saturation(new_setpoint, &saturation);
 			  osMessageQueuePut(SetpointQueueHandle, &new_setpoint, 0, 0);
 		  }
 	  }
-	  osDelay(100);
   }
   /* USER CODE END StartParsingTask */
 }
@@ -359,7 +366,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	if (huart->Instance == USART3) {
 		 if (RB_OK == RB_Write(&buffer, received_char)) {
 			 if (received_char == '\n') {
-				 num_of_received_cmds++;
+				 osSemaphoreRelease(ReadLinesCountingSemHandle);
 			 }
 		 }
 
