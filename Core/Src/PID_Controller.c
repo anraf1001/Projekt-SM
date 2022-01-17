@@ -24,6 +24,7 @@ PID_Controller PID_Create_Saturation(float Kp, float Ki, float Kd, float Tp, Sat
 float calculate_pid(PID_Controller* controller, float error) {
     float P = controller->Kp * error;
 
+    // Odłączenie członu całkującego w erazie wystąpienia nasycenia sygnału sterującego
     if (!controller->windup) {
         controller->last_integral += error + controller->last_error;
     }

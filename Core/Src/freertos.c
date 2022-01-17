@@ -224,9 +224,11 @@ void StartLCDTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	  // Oczekiwanie na nadejście informacji o aktualnej oraz zadanej temperaturze
 	  if (osOK == osMessageQueueGet(TempQueueHandle, &message, NULL, osWaitForever)) {
 		  LCD_Cls();
 
+		  // Wyswietlenie informacji na wyswietlaczu
 		  sprintf((char*)text, "Zad. : %.2f C", message.setpoint);
 		  taskENTER_CRITICAL();
 		  LCD_Locate(0,0);
@@ -239,6 +241,7 @@ void StartLCDTask(void *argument)
 		  LCD_String((char*)text);
 		  taskEXIT_CRITICAL();
 
+		  // Wysłanie informacji za pomocą interfejsu UART
 		  printf("Zad. : %.2f C\r\n", message.setpoint);
 		  printf("Temp.: %.2f C\r\n", message.measured);
 	  }
@@ -277,20 +280,24 @@ void StartControllerTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	  // Odczytanie zmiany wartości zadanej
 	  osMessageQueueGet(SetpointQueueHandle, &setpoint, 0, 0);
 
+	  // Obliczenie sygnału sterującego
 	  taskENTER_CRITICAL();
 	  temperature = BMP280_ReadTemperature();
 	  pid_output = calculate_pid(&controller, setpoint - temperature);
 	  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (uint16_t)(pid_output * 999));
 	  taskEXIT_CRITICAL();
 
+	  // Wysłanie informacji o aktualnej oraz zadanej temperaturze do wyświetlacza
 	  message.setpoint = setpoint;
 	  message.measured = temperature;
 	  if (osOK == osSemaphoreAcquire(TempQueueSemaphoreHandle, 0)) {
 		  osMessageQueuePut(TempQueueHandle, &message, 0, 0);
 	  }
 
+	  // Task wykonuje się co 100 ms
 	  tick += 100;
 	  osDelayUntil(tick);
   }
@@ -310,6 +317,7 @@ void HeartBeatTaskTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	  // Miganie diodą w celu sygnalizacji działania systemu
 	  HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 	  osDelay(500);
   }
@@ -333,11 +341,14 @@ void StartParsingTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	  // Oczekiwanie na nadejście komunikatów na interfejsie UART
 	  if (osOK == osSemaphoreAcquire(ReadLinesCountingSemHandle, osWaitForever)) {
 		  RB_TakeLine(&buffer, received_data);
 
+		  // Zamiana komunikatu na wartość typu float
 		  new_setpoint = atoff((char*)received_data);
 		  if (new_setpoint != 0.0f) {
+			  // Wysłanie odczytanej zadanej temperatury do regulatora
 			  new_setpoint = calculate_saturation(new_setpoint, &saturation);
 			  osMessageQueuePut(SetpointQueueHandle, &new_setpoint, 0, 0);
 		  }

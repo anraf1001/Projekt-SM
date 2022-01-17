@@ -1,7 +1,7 @@
 /*
  * ring_buffer.c
  *
- *  Created on: Jun 7, 2021
+ *  Created on: Jan 10, 2022
  *      Author: anraf1001
  */
 
@@ -39,18 +39,18 @@ void RB_Flush(RingBuffer_t* Buf) {
 }
 
 void RB_TakeLine(RingBuffer_t* Buf, uint8_t* Destination) {
-	uint8_t Tmp;
+	uint8_t temp;
 	uint8_t i = 0;
 
 	do {
-		RB_Read(Buf, &Tmp);
+		RB_Read(Buf, &temp);
 
-		if (Tmp == '\n') {
-		  Destination[i] = 0;
+		if (temp == '\n') {
+			Destination[i] = 0;
 		} else {
-		  Destination[i] = Tmp;
+			Destination[i] = temp;
 		}
 
 		i++;
-	} while (Tmp != '\n');
+	} while (temp != '\n');
 }
