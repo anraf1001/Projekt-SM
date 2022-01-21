@@ -24,7 +24,7 @@ PID_Controller PID_Create_Saturation(float Kp, float Ki, float Kd, float Tp, Sat
 float calculate_pid(PID_Controller* controller, float error) {
     float P = controller->Kp * error;
 
-    // Odłączenie członu całkującego w erazie wystąpienia nasycenia sygnału sterującego
+    // Odłączenie członu całkującego w razie wystąpienia nasycenia sygnału sterującego (anty windup)
     if (!controller->windup) {
         controller->last_integral += error + controller->last_error;
     }
@@ -36,6 +36,7 @@ float calculate_pid(PID_Controller* controller, float error) {
     float u = P + I + D;
     float u_saturation = calculate_saturation(u, controller->saturation);
 
+    // Sprawdzenie czy wystąpił windup
     if (fabs(u) > fabs(u_saturation)) {
         controller->windup = true;
     } else {

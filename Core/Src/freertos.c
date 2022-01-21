@@ -292,11 +292,12 @@ void StartControllerTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  // Odczytanie zmiany wartości zadanej
+	  // Odczytanie zmiany wartości zadanej dostarczonej za pomocą UART
 	  if (osOK == osMessageQueueGet(SetpointQueueHandle, &setpoint, 0, 0)) {
 		  setpoint = calculate_saturation(setpoint, &setpoint_saturation);
 	  }
 
+	  // Odczytanie zmiany wartości zadanej po wciśnięciu przycisku
 	  if (osOK == osMessageQueueGet(ButtonsQueueHandle, &setpoint_offset, 0, 0)) {
 		  setpoint += setpoint_offset;
 		  setpoint = calculate_saturation(setpoint, &setpoint_saturation);
@@ -309,7 +310,7 @@ void StartControllerTask(void *argument)
 	  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, (uint16_t)(pid_output * 999));
 	  taskEXIT_CRITICAL();
 
-	  // Wysłanie informacji o aktualnej oraz zadanej temperaturze do wyświetlacza
+	  // Wysłanie informacji o aktualnej oraz zadanej temperaturze do wyświetlacza (co 1 sekundę)
 	  message.setpoint = setpoint;
 	  message.measured = temperature;
 	  if (osOK == osSemaphoreAcquire(TempQueueSemaphoreHandle, 0)) {
@@ -403,6 +404,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	// Po wystąpieniu przerwania po wciśnięciu przycisku wysyłana jest informacja do kontrolera o zmianie wartości zadanej
 	if (GPIO_Pin == PlusButton_Pin) {
 		osMessageQueuePut(ButtonsQueueHandle, &plus_button_value, 0, 0);
 	} else if (GPIO_Pin == MinusButton_Pin) {
