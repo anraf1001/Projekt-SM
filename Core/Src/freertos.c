@@ -63,6 +63,8 @@ typedef struct {
 /* USER CODE BEGIN Variables */
 RingBuffer_t buffer;
 uint8_t received_char;
+const float plus_button_value = 0.5;
+const float minus_button_value = -0.5;
 /* USER CODE END Variables */
 /* Definitions for LCDTask */
 osThreadId_t LCDTaskHandle;
@@ -101,6 +103,11 @@ const osMessageQueueAttr_t TempQueue_attributes = {
 osMessageQueueId_t SetpointQueueHandle;
 const osMessageQueueAttr_t SetpointQueue_attributes = {
   .name = "SetpointQueue"
+};
+/* Definitions for ButtonsQueue */
+osMessageQueueId_t ButtonsQueueHandle;
+const osMessageQueueAttr_t ButtonsQueue_attributes = {
+  .name = "ButtonsQueue"
 };
 /* Definitions for LcdDataTimer */
 osTimerId_t LcdDataTimerHandle;
@@ -178,6 +185,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of SetpointQueue */
   SetpointQueueHandle = osMessageQueueNew (8, sizeof(float), &SetpointQueue_attributes);
+
+  /* creation of ButtonsQueue */
+  ButtonsQueueHandle = osMessageQueueNew (8, sizeof(float), &ButtonsQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -262,7 +272,9 @@ void StartControllerTask(void *argument)
 	LcdMessage_t message;
 	float temperature;
 	float setpoint = 27.f;
+	float setpoint_offset;
 	float pid_output;
+	Saturation setpoint_saturation = {.lower_bound = 25.f, .upper_bound = 30.f};
 
 	Saturation saturation = {.lower_bound = 0, .upper_bound = 1};
 	const float P = 1.3;
@@ -281,7 +293,14 @@ void StartControllerTask(void *argument)
   for(;;)
   {
 	  // Odczytanie zmiany wartości zadanej
-	  osMessageQueueGet(SetpointQueueHandle, &setpoint, 0, 0);
+	  if (osOK == osMessageQueueGet(SetpointQueueHandle, &setpoint, 0, 0)) {
+		  setpoint = calculate_saturation(setpoint, &setpoint_saturation);
+	  }
+
+	  if (osOK == osMessageQueueGet(ButtonsQueueHandle, &setpoint_offset, 0, 0)) {
+		  setpoint += setpoint_offset;
+		  setpoint = calculate_saturation(setpoint, &setpoint_saturation);
+	  }
 
 	  // Obliczenie sygnału sterującego
 	  taskENTER_CRITICAL();
@@ -336,7 +355,6 @@ void StartParsingTask(void *argument)
   /* USER CODE BEGIN StartParsingTask */
 	uint8_t received_data[16];
 	float new_setpoint;
-	Saturation saturation = {.lower_bound = 25.f, .upper_bound = 30.f};
 	HAL_UART_Receive_IT(&huart3, &received_char, 1);
   /* Infinite loop */
   for(;;)
@@ -349,7 +367,6 @@ void StartParsingTask(void *argument)
 		  new_setpoint = atoff((char*)received_data);
 		  if (new_setpoint != 0.0f) {
 			  // Wysłanie odczytanej zadanej temperatury do regulatora
-			  new_setpoint = calculate_saturation(new_setpoint, &saturation);
 			  osMessageQueuePut(SetpointQueueHandle, &new_setpoint, 0, 0);
 		  }
 	  }
@@ -382,6 +399,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 		 }
 
 		 HAL_UART_Receive_IT(&huart3, &received_char, 1);
+	}
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == PlusButton_Pin) {
+		osMessageQueuePut(ButtonsQueueHandle, &plus_button_value, 0, 0);
+	} else if (GPIO_Pin == MinusButton_Pin) {
+		osMessageQueuePut(ButtonsQueueHandle, &minus_button_value, 0, 0);
 	}
 }
 /* USER CODE END Application */

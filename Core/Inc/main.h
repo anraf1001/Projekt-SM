@@ -58,8 +58,6 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define USER_Btn_Pin GPIO_PIN_13
-#define USER_Btn_GPIO_Port GPIOC
 #define MCO_Pin GPIO_PIN_0
 #define MCO_GPIO_Port GPIOH
 #define RMII_MDC_Pin GPIO_PIN_1
@@ -80,10 +78,16 @@ void Error_Handler(void);
 #define LCD_DB6_GPIO_Port GPIOF
 #define LCD_DB7_Pin GPIO_PIN_13
 #define LCD_DB7_GPIO_Port GPIOF
+#define MinusButton_Pin GPIO_PIN_14
+#define MinusButton_GPIO_Port GPIOF
+#define MinusButton_EXTI_IRQn EXTI15_10_IRQn
 #define LCD_RS_Pin GPIO_PIN_9
 #define LCD_RS_GPIO_Port GPIOE
 #define LCD_E_Pin GPIO_PIN_11
 #define LCD_E_GPIO_Port GPIOE
+#define PlusButton_Pin GPIO_PIN_13
+#define PlusButton_GPIO_Port GPIOE
+#define PlusButton_EXTI_IRQn EXTI15_10_IRQn
 #define RMII_TXD1_Pin GPIO_PIN_13
 #define RMII_TXD1_GPIO_Port GPIOB
 #define LD3_Pin GPIO_PIN_14
