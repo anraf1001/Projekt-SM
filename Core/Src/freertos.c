@@ -65,6 +65,7 @@ RingBuffer_t buffer;
 uint8_t received_char;
 const float plus_button_value = 0.5;
 const float minus_button_value = -0.5;
+uint32_t last_tick;
 /* USER CODE END Variables */
 /* Definitions for LCDTask */
 osThreadId_t LCDTaskHandle;
@@ -269,6 +270,7 @@ void StartLCDTask(void *argument)
 void StartControllerTask(void *argument)
 {
   /* USER CODE BEGIN StartControllerTask */
+	last_tick = osKernelGetTickCount();
 	LcdMessage_t message;
 	float temperature;
 	float setpoint = 27.f;
@@ -405,9 +407,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	// Po wystąpieniu przerwania po wciśnięciu przycisku wysyłana jest informacja do kontrolera o zmianie wartości zadanej
-	if (GPIO_Pin == PlusButton_Pin) {
+	if (GPIO_Pin == PlusButton_Pin && osKernelGetTickCount() - last_tick > 200) {
+		last_tick = osKernelGetTickCount();
 		osMessageQueuePut(ButtonsQueueHandle, &plus_button_value, 0, 0);
-	} else if (GPIO_Pin == MinusButton_Pin) {
+	} else if (GPIO_Pin == MinusButton_Pin && osKernelGetTickCount() - last_tick > 200) {
+		last_tick = osKernelGetTickCount();
 		osMessageQueuePut(ButtonsQueueHandle, &minus_button_value, 0, 0);
 	}
 }
